@@ -115,10 +115,10 @@ function wc_pesapal_gateway_init() {
       
 			add_action('woocommerce_receipt_' . $this->id, array(&$this, 'payment_page'));
 
-	  	//Hooking into the action that checks all GET requests ipn listener url
-	  	add_action('woocommerce_api_' . $this->id, array($this, 'pesapal_ipn_response'));
-			
-			// hooking into the thankyou page specific to pesapal on loading to retrieve appropriate data from PesaPal
+	  	// Hooking into the action that checks all GET requests ipn listener url
+	  	add_action('woocommerce_api_wc_gateway_pesapal', array($this, 'pesapal_ipn_response'));
+
+			// Hooking into the thankyou page specific to pesapal on loading to retrieve appropriate data from PesaPal
 			add_action('woocommerce_thankyou_' . $this->id, array(&$this, 'update_pesapal_transaction'));
       
 	  	// Save settings
@@ -153,7 +153,7 @@ function wc_pesapal_gateway_init() {
 			// Get order details
 			$amount = number_format($order->get_total(), 2); // Format amount to 2 decimal places
 			$currency = get_woocommerce_currency();
-			$desc = 'Order from '. bloginfo('name');
+			$desc = 'Order from ' . get_bloginfo('name');
 			$type = $this->pesapal_order_type; // Default value = MERCHANT
 			$reference = $this->prefixed_order_id($order_id, $this->pesapal_order_prefix); // Unique order id of the transaction
 			$first_name = $order->get_billing_first_name();
@@ -292,7 +292,7 @@ function wc_pesapal_gateway_init() {
 						);
 
 						if ( 'yes' == $this->debug ) {
-							$this->log->add( 'wc_pesapal', 'Txn Details at "update_pesapal_transaction": '. $check_status->getTransactionDetails($pesapal_merchant_reference, $pesapal_tracking_id) );
+							$this->log->add( 'wc_pesapal', 'Txn Details at "update_pesapal_transaction": '. json_encode($check_status->getTransactionDetails($pre_order_id, $pesapal_tracking_id)) );
 							$this->log->add( 'wc_pesapal', 'Status at "update_pesapal_transaction": '. $status );
 						}
 
@@ -300,10 +300,12 @@ function wc_pesapal_gateway_init() {
 							case 'COMPLETED':
 								// Add order note and update the text to output on Thankyou page
   							$order->add_order_note( sprintf( __( '%s payment approved immediately! Transaction ID: %s', $this->plugin_name ), $this->title, $pesapal_tracking_id ) );
-								wc_add_notice(__('Payment Received. Thank you.', $this->plugin_name), 'success');
   							$screen_text = __('Payment Received. Thank you.', $this->plugin_name);
 								$order->update_status('processing', sprintf(__('%s payment approved. Order moved to processing.', $this->plugin_name), $this->title)); 
 								$order->payment_complete();
+								
+								// Reduce stock levels
+								$order->reduce_order_stock();
 								
 								if ( 'yes' == $this->debug ) $this->log->add( 'wc_pesapal', 'Payment Received. Thank you.' );
 								break;
@@ -315,7 +317,7 @@ function wc_pesapal_gateway_init() {
 									 exit;
 								}
 								// Update status to on-hold as the transaction cannot be complete until PesaPal confirms; Update the screen text appropriately
-								$order->update_status('on-hold', sprintf(__('%s Payment Pending.', $this->plugin_name), $this->title));
+								$order->update_status('on-hold', sprintf(__('%s payment pending.', $this->plugin_name), $this->title));
 								$woocommerce->cart->empty_cart(); // To allow one to continue shopping without having to empty cart maually in case payment takes long
 								$screen_text = __('Payment is being processed by Pesapal. We will let you know via email as soon as we are done', $this->plugin_name);
 								
@@ -440,6 +442,10 @@ function wc_pesapal_gateway_init() {
 						// Add order note
 						$order->add_order_note( sprintf( __( '%s payment approved! Transaction ID: %s', $this->plugin_name ), $this->title, $pesapal_tracking_id ) );
 						$order->update_status('processing', sprintf(__('%s payment approved. Order moved to processing.', $this->plugin_name), $this->title)); 
+						
+						// Reduce stock levels
+						$order->reduce_order_stock();
+
 						$woocommerce->cart->empty_cart();
 						break;
 					case 'PENDING':
@@ -474,7 +480,7 @@ function wc_pesapal_gateway_init() {
 					$order_time    = isset($order_time)? $order_time : 'an earlier date';
 					$subject       = sprintf(__('%s Payment for Order: %s %s', $this->plugin_name), $this->title, $order_id, strtolower($status));
 					$body          = __('PesaPal has processed your online payment for order: ' . $order_id . ' transacted at ' .
-										bloginfo('name') . ' on ' . $order_time . '. We hereby inform you that the final status of your payment request is '. $status . '.
+										get_bloginfo('name') . ' on ' . $order_time . '. We hereby inform you that the final status of your payment request is '. $status . '.
  										It was a pleasure doing business with you. <br><br>Please do not reply this email', $this->plugin_name);
 
 					// Need for an appropriate filter here to change look and appearance of email
@@ -586,5 +592,17 @@ function wc_pesapal_gateway_init() {
       return $methods;
   }
   add_filter('woocommerce_payment_gateways', 'woocommerce_add_gateway_pesapal' );
+	
+	/**
+	 *	Create the hook to call the ipn listener
+	 */
+	add_action( 'init', 'check_wc_pesapal_ipn' );
+	function check_wc_pesapal_ipn() {
+		if( $_SERVER['REQUEST_METHOD'] === 'GET') {
+			// Start the payment gateways such that the pesapal gateway can check for ipn
+			WC()->payment_gateways();
+			
+			do_action( 'pesapal_ipn_response' );
+		}
+	}
 }
-
