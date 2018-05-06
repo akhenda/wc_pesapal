@@ -44,7 +44,7 @@ if (count($line_items) > 0) {
   $post_xml .= " />";
 }
 
-if ( 'yes' == $this->debug ) $this->log->add( 'pesapal', 'About to finish Pesapal XML generation' );
+if ( 'yes' == $this->debug ) $this->log->add( 'wc_pesapal', 'About to finish Pesapal XML generation' );
 
 return htmlentities($post_xml);
 
